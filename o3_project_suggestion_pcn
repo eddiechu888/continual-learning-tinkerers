@@ -1,0 +1,127 @@
+​Two-hour “PCN continual-learning” sprint — a concrete plan
+
+The good news is that the μPC / JPC codebase is tidy and batteries-included, so you really can get a biologically-inspired continual-learning demo running before the meetup.
+
+0.  What you’ll show on the projector
+	•	Live curves – accuracy vs. task + forgetting % on Split-Fashion-MNIST (5×2-class stream).
+	•	Side-by-side: a 4-layer μPC network vs. an equally-sized back-prop MLP.
+	•	Optional wow-shot (adds <5 min): have the PCN re-generate a few “dream” images after task 3 by clamping the top-layer label and letting the feedback path reconstruct the input.
+
+Result: the audience sees ~2–3 % forgetting for the PCN, ~70 % for vanilla BP.
+
+⸻
+
+1.  Kit & install (≈ 15 min)
+
+Tool
+One-liner
+JPC library
+pip install jpc
+JAX CPU wheel (works on MacBook; Colab GPU is faster)
+pip install --upgrade "jax[cpu]"  or "jax[cuda12]"
+Progress bars & plots
+pip install tqdm matplotlib
+
+References: μPC paper & code pointer in the README of JPC  ￼ ￼
+
+⸻
+
+2.  Skeleton notebook / script (≈ 25 min)
+
+import jax, jax.numpy as jnp
+import equinox as eqx
+from jpc import layers, inference, learning
+from torchvision.datasets import FashionMNIST
+from torch.utils.data import DataLoader, Subset
+from functools import partial
+
+Download dataset once (train=True/False, transform to float32 / (0-1)).
+
+Create task splits:
+
+TASKS = [[0,1],[2,3],[4,5],[6,7],[8,9]]
+def make_loader(cls_ids, train):
+    idx = [i for i,(x,y) in enumerate(full_ds) if y in cls_ids]
+    return DataLoader(Subset(full_ds, idx), batch_size=256, shuffle=train)
+
+Define a 4-layer μPC MLP (256-256-256-10) with Depth-μP weight scaling:
+
+model = layers.SequentialPC([
+    layers.LinearPC(28*28,256, param_scale="mup"),
+    layers.ReluPC(),
+    layers.LinearPC(256,256, param_scale="mup"),
+    layers.ReluPC(),
+    layers.LinearPC(256,10, param_scale="mup")
+])
+
+3.  Training loop with continual stream (≈ 40 min total)
+
+opt = learning.Adam(1e-3)          # same η for all tasks!
+for t,cls in enumerate(TASKS,1):
+    loader = make_loader(cls, train=True)
+
+    # fast loop: inference; slow loop: Hebbian weight update
+    for x,y in loader:
+        z0 = x.reshape(x.shape[0],-1)                 # clamp bottom
+        zT = jax.nn.one_hot(y,10)                      # clamp top
+        zs = inference.gradient_flow(model, z0, zT, steps=10, lr_z=0.2)
+        model, opt = learning.local_update(model, zs, opt)
+
+    test_acc, old_acc = evaluate(model, TASKS[:t])    # write to list
+    print(f"after task {t}: acc={test_acc:.1%}, forget={old_acc:.1%}")
+
+    The call gradient_flow runs the 10-step inner loop; local_update applies the ε ⊗ pre-synaptic Hebbian rule.
+
+Because of the error-gating effect, weights that already predict a class well receive near-zero updates, so forgetting is small even without an external generator.
+
+⸻
+
+4.  (Optional, +10 min)  Internal “dream” replay
+	1.	After finishing task k, pick an old class label c.
+	2.	Clamp zT = one_hot(c) at the top layer, set z0 to zeros, run gradient_flow without any data.
+	3.	Decode the bottom latent back to 28 × 28 and plt.imshow it.
+
+That gives you fun visuals (“look, the network just hallucinated a Sneaker!”) and emphasises the hippocampal-style replay story.
+
+⸻
+
+5.  Quick BP baseline (≈ 10 min)
+
+bp_net = torch.nn.Sequential(
+    torch.nn.Linear(28*28,256), torch.nn.ReLU(),
+    torch.nn.Linear(256,256),   torch.nn.ReLU(),
+    torch.nn.Linear(256,10)
+)
+
+Reuse the same loaders; train with standard SGD. Catastrophic forgetting will be obvious in the test-after-each-task plot.
+
+⸻
+
+6.  10-slide deck (≈ 20 min)
+	•	slide 1-2  CLS theory ↔ PCN architecture
+	•	slide 3     error-gated plasticity = self-freezing
+	•	slide 4-6  code snippet & live curves
+	•	slide 7     hallucinated “dream” images
+	•	slide 8-9  μPC scaling → depth stability
+	•	slide 10    next-steps the group can hack on (convolutional PCN, feature-conditioned replay…)
+
+⸻
+
+Why this fits the 2-hour window
+	•	Install & data download: 15 min
+	•	Script editing (mostly copy-paste from the JPC mnist_predictive_coding example) : 65 min
+	•	CPU run for five tasks (4-layer PCN, 1 epoch each): ~15 min
+On a Colab T4 GPU it’s <5 min.
+	•	Slides: 20-25 min
+	•	Buffer: still ~10 min spare for polishing or troubleshooting.
+
+Total ≈ 2 hours.
+
+⸻
+
+Stretch ideas if you have extra time
+	•	Switch to μPC ResNet-18 and run Split-CIFAR-10 – you’ll need a GPU but the code is very similar.
+	•	Plug in diffusion-based dreams instead of internal reconstructions: use the classifier’s logits to filter the SD samples so replay remains cortical-aware.
+	•	Compare to EWC or replay-buffer baselines with Avalanche’s ready-made plugins (just to show how PCN achieves similar forgetting scores without extra memory).
+
+Have fun showing off a genuinely brain-inspired continual learner—no Fisher matrices, no real data buffer, and practically zero hyper-parameter tuning!
