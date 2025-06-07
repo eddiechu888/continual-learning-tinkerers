@@ -1,0 +1,70 @@
+Starting Backpropagation Baseline for Continual Learning...
+Using device: cpu
+Downloading and preparing Fashion-MNIST dataset...
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-images-idx3-ubyte.gz
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-images-idx3-ubyte.gz to ./data\FashionMNIST\raw\train-images-idx3-ubyte.gz
+100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 26421880/26421880 [00:02<00:00, 9458207.95it/s]
+Extracting ./data\FashionMNIST\raw\train-images-idx3-ubyte.gz to ./data\FashionMNIST\raw
+
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-labels-idx1-ubyte.gz
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/train-labels-idx1-ubyte.gz to ./data\FashionMNIST\raw\train-labels-idx1-ubyte.gz
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 29515/29515 [00:00<00:00, 202063.62it/s]
+Extracting ./data\FashionMNIST\raw\train-labels-idx1-ubyte.gz to ./data\FashionMNIST\raw
+
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-images-idx3-ubyte.gz
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-images-idx3-ubyte.gz to ./data\FashionMNIST\raw\t10k-images-idx3-ubyte.gz
+100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 4422102/4422102 [00:01<00:00, 3213567.26it/s]
+Extracting ./data\FashionMNIST\raw\t10k-images-idx3-ubyte.gz to ./data\FashionMNIST\raw
+
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-labels-idx1-ubyte.gz
+Downloading http://fashion-mnist.s3-website.eu-central-1.amazonaws.com/t10k-labels-idx1-ubyte.gz to ./data\FashionMNIST\raw\t10k-labels-idx1-ubyte.gz
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5148/5148 [00:00<?, ?it/s]
+Extracting ./data\FashionMNIST\raw\t10k-labels-idx1-ubyte.gz to ./data\FashionMNIST\raw
+
+Creating MLP model...
+Starting continual learning training...
+
+Training on Task 1: Classes ['T-shirt/top', 'Trouser']
+Task 1: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 47/47 [00:00<00:00, 54.41it/s]
+After Task 1:
+  Task 1 accuracy: 97.80%
+  Average accuracy: 97.80%
+  Forgetting rate: 0.00%
+
+Training on Task 2: Classes ['Pullover', 'Dress']
+Task 2: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 47/47 [00:00<00:00, 57.37it/s]
+After Task 2:
+  Task 1 accuracy: 0.00%
+  Task 2 accuracy: 96.25%
+  Average accuracy: 48.12%
+  Forgetting rate: 100.00%
+
+Training on Task 3: Classes ['Coat', 'Sandal']
+Task 3: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 47/47 [00:00<00:00, 57.65it/s]
+After Task 3:
+  Task 1 accuracy: 0.00%
+  Task 2 accuracy: 0.00%
+  Task 3 accuracy: 99.40%
+  Average accuracy: 33.13%
+  Forgetting rate: 100.00%
+
+Training on Task 4: Classes ['Shirt', 'Sneaker']
+Task 4: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 47/47 [00:00<00:00, 48.74it/s] 
+After Task 4:
+  Task 1 accuracy: 0.00%
+  Task 2 accuracy: 0.00%
+  Task 3 accuracy: 0.00%
+  Task 4 accuracy: 99.95%
+  Average accuracy: 24.99%
+  Forgetting rate: 100.00%
+
+Training on Task 5: Classes ['Bag', 'Ankle boot']
+Task 5: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 47/47 [00:00<00:00, 56.70it/s]
+After Task 5:
+  Task 1 accuracy: 0.00%
+  Task 2 accuracy: 0.00%
+  Task 3 accuracy: 0.00%
+  Task 4 accuracy: 0.00%
+  Task 5 accuracy: 99.40%
+  Average accuracy: 19.88%
+  Forgetting rate: 100.00%
