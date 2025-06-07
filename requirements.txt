@@ -1,8 +1,8 @@
-jpc
-jax[cpu]>=0.4.13
-equinox>=0.11.0
-torch>=2.0.0
-torchvision>=0.15.0
-matplotlib>=3.7.0
-numpy>=1.24.0
-tqdm>=4.65.0
+jpc==0.1.0
+jax[cpu]==0.4.35
+equinox==0.11.0
+torch==2.0.1
+torchvision==0.15.2
+matplotlib==3.7.2
+numpy==1.24.4
+tqdm==4.65.0
