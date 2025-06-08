@@ -244,7 +244,17 @@ def main():
         # Train PCN model
         print("Training PCN model...")
         start_time = time.time()
-        for x_batch, y_batch in tqdm(pcn_loader, desc=f"PCN Task {t}"):
+        
+        # Early stopping variables
+        pcn_early_stop = False
+        pcn_eval_interval = 5  # Check accuracy every 5 batches
+        pcn_target_acc = 0.90  # Stop at 90% accuracy
+        
+        # Create a smaller validation set from the current task
+        val_loader_jax = make_loader_jax(test_dataset_jax, cls_ids, batch_size=256, shuffle=False)
+        
+        # Training loop with early stopping
+        for batch_idx, (x_batch, y_batch) in enumerate(tqdm(pcn_loader, desc=f"PCN Task {t}")):
             # Prepare input and target
             z0 = jnp.array(x_batch.reshape(x_batch.shape[0], -1))
             zT = jax.nn.one_hot(jnp.array(y_batch), 10)
@@ -260,14 +270,35 @@ def main():
             
             # Update model and optimizer state
             pcn_model, pcn_opt_state = result["model"], result["opt_state"]
+            
+            # Check accuracy periodically for early stopping
+            if (batch_idx + 1) % pcn_eval_interval == 0:
+                # Evaluate on current task only
+                current_acc = evaluate_pcn(pcn_model, [cls_ids], test_dataset_jax)[0]
+                print(f"  PCN Batch {batch_idx+1}: Current accuracy = {current_acc:.2%}")
+                
+                if current_acc >= pcn_target_acc:
+                    print(f"  PCN reached target accuracy of {pcn_target_acc:.0%}. Early stopping.")
+                    pcn_early_stop = True
+                    break
         
         pcn_train_time = time.time() - start_time
         
         # Train BP model
         print("Training BP model...")
         start_time = time.time()
+        
+        # Early stopping variables
+        bp_early_stop = False
+        bp_eval_interval = 5  # Check accuracy every 5 batches
+        bp_target_acc = 0.90  # Stop at 90% accuracy
+        
+        # Create a smaller validation set from the current task
+        val_loader_torch = make_loader_torch(test_dataset_torch, cls_ids, batch_size=256, shuffle=False)
+        
+        # Training loop with early stopping
         bp_model.train()
-        for x_batch, y_batch in tqdm(bp_loader, desc=f"BP Task {t}"):
+        for batch_idx, (x_batch, y_batch) in enumerate(tqdm(bp_loader, desc=f"BP Task {t}")):
             # Prepare input and target
             x_batch = x_batch.view(x_batch.size(0), -1).to(device)
             y_batch = y_batch.to(device)
@@ -280,6 +311,17 @@ def main():
             # Backward pass and optimize
             loss.backward()
             bp_optimizer.step()
+            
+            # Check accuracy periodically for early stopping
+            if (batch_idx + 1) % bp_eval_interval == 0:
+                # Evaluate on current task only
+                current_acc = evaluate_bp(bp_model, [cls_ids], test_dataset_torch, device)[0]
+                print(f"  BP Batch {batch_idx+1}: Current accuracy = {current_acc:.2%}")
+                
+                if current_acc >= bp_target_acc:
+                    print(f"  BP reached target accuracy of {bp_target_acc:.0%}. Early stopping.")
+                    bp_early_stop = True
+                    break
         
         bp_train_time = time.time() - start_time
         
