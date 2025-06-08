@@ -69,11 +69,15 @@ def evaluate(model, tasks, test_dataset):
             # Initialize activities with feedforward pass
             activities = jpc.init_activities_with_ffwd(model=model, input=z0)
             
+            # Create a dummy output for evaluation (zeros with the right shape)
+            # We'll use one-hot encoding with 10 classes (same as during training)
+            dummy_output = jnp.zeros((z0.shape[0], 10))
+            
             # Run inference to equilibrium
             converged_activities = jpc.solve_inference(
                 params=(model, None),
                 activities=activities,
-                output=None,  # No target during evaluation
+                output=dummy_output,  # Dummy output with correct shape
                 input=z0
             )
             
