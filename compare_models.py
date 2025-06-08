@@ -8,7 +8,8 @@ and provides a side-by-side comparison of their performance.
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-from jpc import layers, inference, learning
+import jpc
+import optax
 
 import torch
 import torch.nn as nn
@@ -125,10 +126,23 @@ def evaluate_pcn(model, tasks, test_dataset):
             
             # Forward pass (inference)
             z0 = jnp.array(x_batch)
-            zs = inference.gradient_flow(model, z0, None, steps=10, lr_z=0.2)
             
-            # Get predictions
-            logits = zs[-1][-1]  # Last layer's output
+            # Initialize activities with feedforward pass
+            activities = jpc.init_activities_with_ffwd(model=model, input=z0)
+            
+            # Create a dummy output for evaluation (zeros with the right shape)
+            dummy_output = jnp.zeros((z0.shape[0], 10))
+            
+            # Run inference to equilibrium
+            converged_activities = jpc.solve_inference(
+                params=(model, None),
+                activities=activities,
+                output=dummy_output,  # Dummy output with correct shape
+                input=z0
+            )
+            
+            # Get predictions from the last layer's output
+            logits = converged_activities[-1][-1]  # Last layer's output
             predictions = jnp.argmax(logits, axis=1)
             
             # Calculate accuracy
@@ -152,11 +166,20 @@ def generate_dream_images(model, class_idx, num_images=5):
         # Start with zeros at the bottom layer
         z0 = jnp.zeros((1, 28*28))
         
-        # Run gradient flow to generate the dream
-        zs = inference.gradient_flow(model, z0, zT.reshape(1, -1), steps=50, lr_z=0.5)
+        # Initialize activities with zeros
+        activities = jpc.init_activities_with_ffwd(model=model, input=z0)
+        
+        # Run inference to equilibrium with clamped output
+        converged_activities = jpc.solve_inference(
+            params=(model, None),
+            activities=activities,
+            output=zT.reshape(1, -1),
+            input=z0,
+            t_max=50.0  # Longer inference time for dream generation
+        )
         
         # Get the generated image
-        dream_image = zs[0][-1].reshape(28, 28)
+        dream_image = converged_activities[0][-1].reshape(28, 28)
         dream_images.append(dream_image)
     
     return dream_images
@@ -176,19 +199,22 @@ def main():
     # Create models
     print("Creating models...")
     # PCN model
-    pcn_model = layers.SequentialPC([
-        layers.LinearPC(28*28, 256, param_scale="mup"),
-        layers.ReluPC(),
-        layers.LinearPC(256, 256, param_scale="mup"),
-        layers.ReluPC(),
-        layers.LinearPC(256, 10, param_scale="mup")
-    ])
+    key = jax.random.PRNGKey(42)
+    pcn_model = jpc.make_mlp(
+        key,
+        input_dim=28*28,
+        width=256,
+        depth=2,  # This creates 2 hidden layers
+        output_dim=10,
+        act_fn="relu"
+    )
     
     # BP model
     bp_model = MLP().to(device)
     
     # Create optimizers
-    pcn_opt = learning.Adam(1e-3)
+    pcn_optim = optax.adam(1e-3)
+    pcn_opt_state = pcn_optim.init((eqx.filter(pcn_model, eqx.is_array), None))
     bp_optimizer = optim.Adam(bp_model.parameters(), lr=1e-3)
     bp_criterion = nn.CrossEntropyLoss()
     
@@ -215,11 +241,17 @@ def main():
             z0 = jnp.array(x_batch.reshape(x_batch.shape[0], -1))
             zT = jax.nn.one_hot(jnp.array(y_batch), 10)
             
-            # Fast loop: inference
-            zs = inference.gradient_flow(pcn_model, z0, zT, steps=10, lr_z=0.2)
+            # Use JPC's make_pc_step to handle both inference and parameter updates
+            result = jpc.make_pc_step(
+                model=pcn_model,
+                optim=pcn_optim,
+                opt_state=pcn_opt_state,
+                output=zT,
+                input=z0
+            )
             
-            # Slow loop: Hebbian weight update
-            pcn_model, pcn_opt = learning.local_update(pcn_model, zs, pcn_opt)
+            # Update model and optimizer state
+            pcn_model, pcn_opt_state = result["model"], result["opt_state"]
         
         pcn_train_time = time.time() - start_time
         
