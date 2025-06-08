@@ -174,8 +174,8 @@ def generate_dream_images(model, class_idx, num_images=5):
             params=(model, None),
             activities=activities,
             output=zT.reshape(1, -1),
-            input=z0,
-            t_max=50.0  # Longer inference time for dream generation
+            input=z0
+            # Note: t_max is not supported in this version of JPC
         )
         
         # Get the generated image
