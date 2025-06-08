@@ -8,7 +8,8 @@ forgetting in continual learning scenarios using Split-Fashion-MNIST dataset.
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-from jpc import layers, inference, learning
+import jpc
+import optax
 import torch
 from torchvision.datasets import FashionMNIST
 from torchvision import transforms
@@ -64,10 +65,20 @@ def evaluate(model, tasks, test_dataset):
             
             # Forward pass (inference)
             z0 = jnp.array(x_batch)
-            zs = inference.gradient_flow(model, z0, None, steps=10, lr_z=0.2)
             
-            # Get predictions
-            logits = zs[-1][-1]  # Last layer's output
+            # Initialize activities with feedforward pass
+            activities = jpc.init_activities_with_ffwd(model=model, input=z0)
+            
+            # Run inference to equilibrium
+            converged_activities = jpc.solve_inference(
+                params=(model, None),
+                activities=activities,
+                output=None,  # No target during evaluation
+                input=z0
+            )
+            
+            # Get predictions from the last layer's output
+            logits = converged_activities[-1][-1]
             predictions = jnp.argmax(logits, axis=1)
             
             # Calculate accuracy
@@ -89,16 +100,19 @@ def main():
     
     # Create PCN model
     print("Creating PCN model...")
-    model = layers.SequentialPC([
-        layers.LinearPC(28*28, 256, param_scale="mup"),
-        layers.ReluPC(),
-        layers.LinearPC(256, 256, param_scale="mup"),
-        layers.ReluPC(),
-        layers.LinearPC(256, 10, param_scale="mup")
-    ])
+    key = jax.random.PRNGKey(42)
+    model = jpc.make_mlp(
+        key,
+        input_dim=28*28,
+        width=256,
+        depth=2,  # This creates 2 hidden layers
+        output_dim=10,
+        act_fn="relu"
+    )
     
     # Create optimizer
-    opt = learning.Adam(1e-3)  # Same learning rate for all tasks
+    optim = optax.adam(1e-3)  # Same learning rate for all tasks
+    opt_state = optim.init((eqx.filter(model, eqx.is_array), None))
     
     # Lists to track performance
     task_accuracies = []
@@ -116,11 +130,17 @@ def main():
             z0 = jnp.array(x_batch.reshape(x_batch.shape[0], -1))  # Flatten images
             zT = jax.nn.one_hot(jnp.array(y_batch), 10)  # One-hot encode targets
             
-            # Fast loop: inference
-            zs = inference.gradient_flow(model, z0, zT, steps=10, lr_z=0.2)
+            # Use JPC's make_pc_step to handle both inference and parameter updates
+            result = jpc.make_pc_step(
+                model=model,
+                optim=optim,
+                opt_state=opt_state,
+                output=zT,
+                input=z0
+            )
             
-            # Slow loop: Hebbian weight update
-            model, opt = learning.local_update(model, zs, opt)
+            # Update model and optimizer state
+            model, opt_state = result["model"], result["opt_state"]
         
         # Evaluate on all tasks seen so far
         current_tasks = TASKS[:t]
