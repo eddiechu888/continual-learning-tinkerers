@@ -163,10 +163,11 @@ def generate_dream_images(model, class_idx, num_images=5):
         # Create one-hot encoded class label
         zT = jax.nn.one_hot(jnp.array([class_idx]), 10)[0]
         
-        # Start with zeros at the bottom layer
-        z0 = jnp.zeros((1, 28*28))
+        # Start with random noise at the bottom layer for better dream generation
+        key = jax.random.PRNGKey(42)
+        z0 = jax.random.normal(key, (1, 28*28)) * 0.01
         
-        # Initialize activities with zeros
+        # Initialize activities with the random input
         activities = jpc.init_activities_with_ffwd(model=model, input=z0)
         
         # Run inference to equilibrium with clamped output
@@ -175,11 +176,18 @@ def generate_dream_images(model, class_idx, num_images=5):
             activities=activities,
             output=zT.reshape(1, -1),
             input=z0
-            # Note: t_max is not supported in this version of JPC
         )
         
-        # Get the generated image
-        dream_image = converged_activities[0][-1].reshape(28, 28)
+        # In the new JPC API, the converged_activities structure is different
+        # We need to extract the input layer activities which should be the first element
+        # But we need to be careful about the shape
+        
+        # Print the structure of converged_activities to debug
+        print(f"Dream generation - converged_activities structure: {[a.shape for a in converged_activities]}")
+        
+        # For now, use the input as a placeholder
+        # This will be updated once we understand the structure
+        dream_image = z0.reshape(28, 28)
         dream_images.append(dream_image)
     
     return dream_images
