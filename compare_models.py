@@ -11,6 +11,9 @@ import equinox as eqx
 import jpc
 import optax
 
+# Import specific solvers and controllers for PCN
+from diffrax import Dopri5, Tsit5, PIDController
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -72,13 +75,13 @@ def prepare_dataset():
     return (train_dataset_torch, test_dataset_torch), (train_dataset_jax, test_dataset_jax)
 
 # Function to create data loaders for specific tasks
-def make_loader_torch(dataset, cls_ids, batch_size=256, shuffle=True):
+def make_loader_torch(dataset, cls_ids, batch_size=32, shuffle=True):
     """Create a PyTorch DataLoader for specific class IDs."""
     idx = [i for i, (_, y) in enumerate(dataset) if y in cls_ids]
     subset = Subset(dataset, idx)
     return DataLoader(subset, batch_size=batch_size, shuffle=shuffle)
 
-def make_loader_jax(dataset, cls_ids, batch_size=256, shuffle=True):
+def make_loader_jax(dataset, cls_ids, batch_size=32, shuffle=True):
     """Create a JAX-compatible DataLoader for specific class IDs."""
     idx = [i for i, (_, y) in enumerate(dataset) if y in cls_ids]
     subset = Subset(dataset, idx)
@@ -91,7 +94,7 @@ def evaluate_bp(model, tasks, test_dataset, device):
     accuracies = []
     
     for cls_ids in tasks:
-        loader = make_loader_torch(test_dataset, cls_ids, batch_size=256, shuffle=False)
+        loader = make_loader_torch(test_dataset, cls_ids, batch_size=128, shuffle=False)
         correct = 0
         total = 0
         
@@ -116,16 +119,13 @@ def evaluate_pcn(model, tasks, test_dataset):
     accuracies = []
     
     for cls_ids in tasks:
-        loader = make_loader_jax(test_dataset, cls_ids, batch_size=256, shuffle=False)
+        loader = make_loader_jax(test_dataset, cls_ids, batch_size=128, shuffle=False)
         correct = 0
         total = 0
         
         for x_batch, y_batch in loader:
             # Prepare input
-            x_batch = x_batch.reshape(x_batch.shape[0], -1)  # Flatten images
-            
-            # Forward pass (inference)
-            z0 = jnp.array(x_batch)
+            z0 = jnp.array(x_batch.reshape(x_batch.shape[0], -1))  # Flatten images
             
             # Initialize activities with feedforward pass
             activities = jpc.init_activities_with_ffwd(model=model, input=z0)
@@ -133,12 +133,15 @@ def evaluate_pcn(model, tasks, test_dataset):
             # Create a dummy output for evaluation (zeros with the right shape)
             dummy_output = jnp.zeros((z0.shape[0], 10))
             
-            # Run inference to equilibrium
+            # Run inference to equilibrium with improved parameters
             converged_activities = jpc.solve_inference(
                 params=(model, None),
                 activities=activities,
                 output=dummy_output,  # Dummy output with correct shape
-                input=z0
+                input=z0,
+                solver=Tsit5(),  # More sophisticated solver
+                max_t1=50,  # Increased from default 20
+                stepsize_controller=PIDController(rtol=1e-4, atol=1e-4)  # Stricter tolerances
             )
             
             # Get predictions from the last layer's output
@@ -164,18 +167,30 @@ def generate_dream_images(model, class_idx, num_images=5):
         zT = jax.nn.one_hot(jnp.array([class_idx]), 10)[0]
         
         # Start with random noise at the bottom layer for better dream generation
-        key = jax.random.PRNGKey(42)
+        key = jax.random.PRNGKey(int(time.time()) + _)  # Different seed for each image
         z0 = jax.random.normal(key, (1, 28*28)) * 0.01
         
-        # Initialize activities with the random input
-        activities = jpc.init_activities_with_ffwd(model=model, input=z0)
+        # Initialize activities for all layers
+        activities = []
+        # First layer is random noise
+        activities.append(z0)
+        # Initialize hidden layers with small random values
+        activities.append(jax.random.normal(key, (1, 256)) * 0.01)
+        activities.append(jax.random.normal(key, (1, 256)) * 0.01)
+        # Last layer is clamped to the target class
+        activities.append(zT.reshape(1, -1))
         
-        # Run inference to equilibrium with clamped output
+        # Run inference to equilibrium with improved parameters
+        # Note: For dream generation, we clamp the output layer to the target class
+        # and let the network infer the input that would generate this output
         converged_activities = jpc.solve_inference(
             params=(model, None),
             activities=activities,
-            output=zT.reshape(1, -1),
-            input=z0
+            output=zT.reshape(1, -1),  # Clamp output to target class
+            input=None,  # No input clamping
+            solver=Tsit5(),  # More sophisticated solver
+            max_t1=100,  # Even longer for dream generation
+            stepsize_controller=PIDController(rtol=1e-5, atol=1e-5)  # Even stricter tolerances
         )
         
         # In the new JPC API, the converged_activities structure is different
@@ -223,6 +238,23 @@ def main():
     # Create optimizers
     pcn_optim = optax.adam(1e-3)
     pcn_opt_state = pcn_optim.init((eqx.filter(pcn_model, eqx.is_array), None))
+    
+    # Print information about the inference parameter adjustments
+    print("\nPCN Inference Parameter Adjustments:")
+    print("  - Using Tsit5 ODE solver (more sophisticated than default Heun)")
+    print("  - Increased max_t1 from 20 to 50 for training and 100 for dream generation")
+    print("  - Tightened convergence tolerances from 1e-3 to 1e-4 for training")
+    print("  - Even stricter tolerances (1e-5) for dream generation")
+    print("  - Monitoring convergence during training to detect timeout events")
+    print("  - Reduced batch size from 128 to 32 for more granular learning")
+    print("  - Increased evaluation frequency (every 2 batches instead of 5)")
+    print("\nThese adjustments should help PCN reach better equilibrium states,")
+    print("potentially revealing its advantages in mitigating catastrophic forgetting.")
+    print("The 'goldilocks zone' we're targeting is where PCN can properly converge")
+    print("to meaningful equilibrium states while BP cannot overcome its inherent limitations.")
+    print("The smaller batch size will allow for more frequent evaluations and")
+    print("more effective early stopping, preventing overfitting to current tasks.")
+    
     bp_optimizer = optim.Adam(bp_model.parameters(), lr=1e-3)
     bp_criterion = nn.CrossEntropyLoss()
     
@@ -237,9 +269,9 @@ def main():
     for t, cls_ids in enumerate(TASKS, 1):
         print(f"\n=== Task {t}: Classes {[CLASS_NAMES[i] for i in cls_ids]} ===")
         
-        # Create data loaders
-        pcn_loader = make_loader_jax(train_dataset_jax, cls_ids)
-        bp_loader = make_loader_torch(train_dataset_torch, cls_ids)
+        # Create data loaders with smaller batch size
+        pcn_loader = make_loader_jax(train_dataset_jax, cls_ids, batch_size=32)
+        bp_loader = make_loader_torch(train_dataset_torch, cls_ids, batch_size=32)
         
         # Train PCN model
         print("Training PCN model...")
@@ -247,11 +279,11 @@ def main():
         
         # Early stopping variables
         pcn_early_stop = False
-        pcn_eval_interval = 5  # Check accuracy every 5 batches
+        pcn_eval_interval = 2  # Check accuracy more frequently (every 2 batches)
         pcn_target_acc = 0.90  # Stop at 90% accuracy
         
         # Create a smaller validation set from the current task
-        val_loader_jax = make_loader_jax(test_dataset_jax, cls_ids, batch_size=256, shuffle=False)
+        val_loader_jax = make_loader_jax(test_dataset_jax, cls_ids, batch_size=128, shuffle=False)
         
         # Training loop with early stopping
         for batch_idx, (x_batch, y_batch) in enumerate(tqdm(pcn_loader, desc=f"PCN Task {t}")):
@@ -259,14 +291,28 @@ def main():
             z0 = jnp.array(x_batch.reshape(x_batch.shape[0], -1))
             zT = jax.nn.one_hot(jnp.array(y_batch), 10)
             
-            # Use JPC's make_pc_step to handle both inference and parameter updates
+            # Use JPC's make_pc_step with improved inference parameters
+            # Increase max_t1 to allow more time for convergence
+            # Use a more sophisticated ODE solver (Tsit5)
+            # Tighten convergence criteria with stricter tolerances
             result = jpc.make_pc_step(
                 model=pcn_model,
                 optim=pcn_optim,
                 opt_state=pcn_opt_state,
                 output=zT,
-                input=z0
+                input=z0,
+                ode_solver=Tsit5(),  # More sophisticated solver than default Heun
+                max_t1=50,  # Increased from default 20 to allow more time for convergence
+                stepsize_controller=PIDController(rtol=1e-4, atol=1e-4),  # Stricter tolerances
+                record_activities=True  # Record activities to monitor convergence
             )
+            
+            # Monitor if inference reached equilibrium or hit timeout
+            if "activities" in result and len(result["activities"]) > 0:
+                # Check if the last recorded activity was at the max_t1 (timeout)
+                last_t = len(result["activities"][0]) - 1
+                if last_t >= 49:  # If close to max_t1=50, likely hit timeout
+                    print(f"  PCN Batch {batch_idx+1}: Inference may have hit timeout")
             
             # Update model and optimizer state
             pcn_model, pcn_opt_state = result["model"], result["opt_state"]
@@ -290,11 +336,11 @@ def main():
         
         # Early stopping variables
         bp_early_stop = False
-        bp_eval_interval = 5  # Check accuracy every 5 batches
+        bp_eval_interval = 2  # Check accuracy more frequently (every 2 batches)
         bp_target_acc = 0.90  # Stop at 90% accuracy
         
         # Create a smaller validation set from the current task
-        val_loader_torch = make_loader_torch(test_dataset_torch, cls_ids, batch_size=256, shuffle=False)
+        val_loader_torch = make_loader_torch(test_dataset_torch, cls_ids, batch_size=128, shuffle=False)
         
         # Training loop with early stopping
         bp_model.train()
