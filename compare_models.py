@@ -75,13 +75,13 @@ def prepare_dataset():
     return (train_dataset_torch, test_dataset_torch), (train_dataset_jax, test_dataset_jax)
 
 # Function to create data loaders for specific tasks
-def make_loader_torch(dataset, cls_ids, batch_size=32, shuffle=True):
+def make_loader_torch(dataset, cls_ids, batch_size=16, shuffle=True):
     """Create a PyTorch DataLoader for specific class IDs."""
     idx = [i for i, (_, y) in enumerate(dataset) if y in cls_ids]
     subset = Subset(dataset, idx)
     return DataLoader(subset, batch_size=batch_size, shuffle=shuffle)
 
-def make_loader_jax(dataset, cls_ids, batch_size=32, shuffle=True):
+def make_loader_jax(dataset, cls_ids, batch_size=16, shuffle=True):
     """Create a JAX-compatible DataLoader for specific class IDs."""
     idx = [i for i, (_, y) in enumerate(dataset) if y in cls_ids]
     subset = Subset(dataset, idx)
@@ -94,7 +94,7 @@ def evaluate_bp(model, tasks, test_dataset, device):
     accuracies = []
     
     for cls_ids in tasks:
-        loader = make_loader_torch(test_dataset, cls_ids, batch_size=128, shuffle=False)
+        loader = make_loader_torch(test_dataset, cls_ids, batch_size=16, shuffle=False)
         correct = 0
         total = 0
         
@@ -119,7 +119,7 @@ def evaluate_pcn(model, tasks, test_dataset):
     accuracies = []
     
     for cls_ids in tasks:
-        loader = make_loader_jax(test_dataset, cls_ids, batch_size=128, shuffle=False)
+        loader = make_loader_jax(test_dataset, cls_ids, batch_size=16, shuffle=False)
         correct = 0
         total = 0
         
@@ -246,7 +246,7 @@ def main():
     print("  - Tightened convergence tolerances from 1e-3 to 1e-4 for training")
     print("  - Even stricter tolerances (1e-5) for dream generation")
     print("  - Monitoring convergence during training to detect timeout events")
-    print("  - Reduced batch size from 128 to 32 for more granular learning")
+    print("  - Reduced batch size from 128 to 16 for more granular learning")
     print("  - Increased evaluation frequency (every 2 batches instead of 5)")
     print("\nThese adjustments should help PCN reach better equilibrium states,")
     print("potentially revealing its advantages in mitigating catastrophic forgetting.")
@@ -269,9 +269,9 @@ def main():
     for t, cls_ids in enumerate(TASKS, 1):
         print(f"\n=== Task {t}: Classes {[CLASS_NAMES[i] for i in cls_ids]} ===")
         
-        # Create data loaders with smaller batch size
-        pcn_loader = make_loader_jax(train_dataset_jax, cls_ids, batch_size=32)
-        bp_loader = make_loader_torch(train_dataset_torch, cls_ids, batch_size=32)
+        # Create data loaders with even smaller batch size
+        pcn_loader = make_loader_jax(train_dataset_jax, cls_ids, batch_size=16)
+        bp_loader = make_loader_torch(train_dataset_torch, cls_ids, batch_size=16)
         
         # Train PCN model
         print("Training PCN model...")
@@ -283,7 +283,7 @@ def main():
         pcn_target_acc = 0.90  # Stop at 90% accuracy
         
         # Create a smaller validation set from the current task
-        val_loader_jax = make_loader_jax(test_dataset_jax, cls_ids, batch_size=128, shuffle=False)
+        val_loader_jax = make_loader_jax(test_dataset_jax, cls_ids, batch_size=16, shuffle=False)
         
         # Training loop with early stopping
         for batch_idx, (x_batch, y_batch) in enumerate(tqdm(pcn_loader, desc=f"PCN Task {t}")):
@@ -340,7 +340,7 @@ def main():
         bp_target_acc = 0.90  # Stop at 90% accuracy
         
         # Create a smaller validation set from the current task
-        val_loader_torch = make_loader_torch(test_dataset_torch, cls_ids, batch_size=128, shuffle=False)
+        val_loader_torch = make_loader_torch(test_dataset_torch, cls_ids, batch_size=16, shuffle=False)
         
         # Training loop with early stopping
         bp_model.train()
