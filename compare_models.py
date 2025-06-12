@@ -76,13 +76,13 @@ def prepare_dataset():
     return (train_dataset_torch, test_dataset_torch), (train_dataset_jax, test_dataset_jax)
 
 # Function to create data loaders for specific tasks
-def make_loader_torch(dataset, cls_ids, batch_size=8, shuffle=True):
+def make_loader_torch(dataset, cls_ids, batch_size=4, shuffle=True):
     """Create a PyTorch DataLoader for specific class IDs."""
     idx = [i for i, (_, y) in enumerate(dataset) if y in cls_ids]
     subset = Subset(dataset, idx)
     return DataLoader(subset, batch_size=batch_size, shuffle=shuffle)
 
-def make_loader_jax(dataset, cls_ids, batch_size=8, shuffle=True):
+def make_loader_jax(dataset, cls_ids, batch_size=4, shuffle=True):
     """Create a JAX-compatible DataLoader for specific class IDs."""
     idx = [i for i, (_, y) in enumerate(dataset) if y in cls_ids]
     subset = Subset(dataset, idx)
@@ -95,7 +95,7 @@ def evaluate_bp(model, tasks, test_dataset, device):
     accuracies = []
     
     for cls_ids in tasks:
-        loader = make_loader_torch(test_dataset, cls_ids, batch_size=8, shuffle=False)
+        loader = make_loader_torch(test_dataset, cls_ids, batch_size=4, shuffle=False)
         correct = 0
         total = 0
         
@@ -247,7 +247,7 @@ def main():
     print("  - Tightened convergence tolerances from 1e-3 to 1e-4 for training")
     print("  - Even stricter tolerances (1e-5) for dream generation")
     print("  - Monitoring convergence during training to detect timeout events")
-    print("  - Reduced batch size from 128 to 8 for more granular learning")
+    print("  - Reduced batch size from 128 to 4 for more granular learning")
     print("  - Increased evaluation frequency (every 2 batches instead of 5)")
     print("\nThese adjustments should help PCN reach better equilibrium states,")
     print("potentially revealing its advantages in mitigating catastrophic forgetting.")
