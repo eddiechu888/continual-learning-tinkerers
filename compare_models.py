@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import jpc
 import optax
+import numpy as np
 
 # Import specific solvers and controllers for PCN
 from diffrax import Dopri5, Tsit5, PIDController
@@ -264,6 +265,10 @@ def main():
     bp_task_accuracies = []
     bp_forgetting_rates = []
     
+    # Track number of batches needed to reach target accuracy
+    pcn_batches_to_converge = []
+    bp_batches_to_converge = []
+    
     # Training loop with continual stream
     print("Starting continual learning training...")
     for t, cls_ids in enumerate(TASKS, 1):
@@ -324,9 +329,14 @@ def main():
                 print(f"  PCN Batch {batch_idx+1}: Current accuracy = {current_acc:.2%}")
                 
                 if current_acc >= pcn_target_acc:
-                    print(f"  PCN reached target accuracy of {pcn_target_acc:.0%}. Early stopping.")
+                    print(f"  PCN reached target accuracy of {pcn_target_acc:.0%} in {batch_idx+1} batches. Early stopping.")
+                    pcn_batches_to_converge.append(batch_idx+1)
                     pcn_early_stop = True
                     break
+        
+        # If early stopping didn't trigger, record the total number of batches
+        if not pcn_early_stop:
+            pcn_batches_to_converge.append(len(pcn_loader))
         
         pcn_train_time = time.time() - start_time
         
@@ -365,9 +375,14 @@ def main():
                 print(f"  BP Batch {batch_idx+1}: Current accuracy = {current_acc:.2%}")
                 
                 if current_acc >= bp_target_acc:
-                    print(f"  BP reached target accuracy of {bp_target_acc:.0%}. Early stopping.")
+                    print(f"  BP reached target accuracy of {bp_target_acc:.0%} in {batch_idx+1} batches. Early stopping.")
+                    bp_batches_to_converge.append(batch_idx+1)
                     bp_early_stop = True
                     break
+        
+        # If early stopping didn't trigger, record the total number of batches
+        if not bp_early_stop:
+            bp_batches_to_converge.append(len(bp_loader))
         
         bp_train_time = time.time() - start_time
         
@@ -395,6 +410,7 @@ def main():
         # Print results
         print(f"\nResults after Task {t}:")
         print(f"PCN training time: {pcn_train_time:.2f}s, BP training time: {bp_train_time:.2f}s")
+        print(f"PCN batches to reach target: {pcn_batches_to_converge[-1]}, BP batches: {bp_batches_to_converge[-1]}")
         
         print("\nPCN Model:")
         for i, acc in enumerate(pcn_accuracies):
@@ -423,10 +439,10 @@ def main():
             plt.savefig('pcn_dream_images.png')
     
     # Plot final comparison results
-    plt.figure(figsize=(15, 10))
+    plt.figure(figsize=(15, 15))
     
     # Plot task accuracies for PCN
-    plt.subplot(2, 2, 1)
+    plt.subplot(3, 2, 1)
     for i in range(len(TASKS)):
         task_acc = [accs[i] if i < len(accs) else None for accs in pcn_task_accuracies]
         plt.plot(range(1, i+2), task_acc[:i+1], marker='o', label=f'Task {i+1}')
@@ -438,7 +454,7 @@ def main():
     plt.grid(True)
     
     # Plot task accuracies for BP
-    plt.subplot(2, 2, 2)
+    plt.subplot(3, 2, 2)
     for i in range(len(TASKS)):
         task_acc = [accs[i] if i < len(accs) else None for accs in bp_task_accuracies]
         plt.plot(range(1, i+2), task_acc[:i+1], marker='o', label=f'Task {i+1}')
@@ -449,8 +465,40 @@ def main():
     plt.legend()
     plt.grid(True)
     
+    # Plot final task accuracies (bar chart comparison)
+    plt.subplot(3, 2, 3)
+    final_pcn_accs = pcn_task_accuracies[-1]
+    final_bp_accs = bp_task_accuracies[-1]
+    x = np.arange(len(TASKS))
+    width = 0.35
+    
+    plt.bar(x - width/2, final_pcn_accs, width, label='PCN')
+    plt.bar(x + width/2, final_bp_accs, width, label='BP')
+    
+    plt.xlabel('Task')
+    plt.ylabel('Final Accuracy')
+    plt.title('Final Task Accuracies After All Training')
+    plt.xticks(x, [f'Task {i+1}' for i in range(len(TASKS))])
+    plt.legend()
+    plt.grid(True, axis='y')
+    
+    # Plot batches needed to reach target accuracy
+    plt.subplot(3, 2, 4)
+    x = np.arange(len(TASKS))
+    width = 0.35
+    
+    plt.bar(x - width/2, pcn_batches_to_converge, width, label='PCN')
+    plt.bar(x + width/2, bp_batches_to_converge, width, label='BP')
+    
+    plt.xlabel('Task')
+    plt.ylabel('Batches to Reach Target')
+    plt.title('Training Efficiency: Batches to Reach Target Accuracy')
+    plt.xticks(x, [f'Task {i+1}' for i in range(len(TASKS))])
+    plt.legend()
+    plt.grid(True, axis='y')
+    
     # Plot forgetting rates
-    plt.subplot(2, 2, 3)
+    plt.subplot(3, 2, 5)
     plt.plot(range(1, len(pcn_forgetting_rates)+1), pcn_forgetting_rates, marker='o', label='PCN')
     plt.plot(range(1, len(bp_forgetting_rates)+1), bp_forgetting_rates, marker='o', label='BP')
     plt.xlabel('Tasks Learned')
@@ -460,7 +508,7 @@ def main():
     plt.grid(True)
     
     # Plot average accuracy
-    plt.subplot(2, 2, 4)
+    plt.subplot(3, 2, 6)
     pcn_avg_acc = [sum(accs)/len(accs) for accs in pcn_task_accuracies]
     bp_avg_acc = [sum(accs)/len(accs) for accs in bp_task_accuracies]
     plt.plot(range(1, len(pcn_avg_acc)+1), pcn_avg_acc, marker='o', label='PCN')
