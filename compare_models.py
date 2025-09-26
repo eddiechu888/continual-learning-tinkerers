@@ -12,9 +12,6 @@ import jpc
 import optax
 import numpy as np
 
-# Import specific solvers and controllers for PCN
-from diffrax import Dopri5, Tsit5, PIDController
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -140,9 +137,6 @@ def evaluate_pcn(model, tasks, test_dataset):
                 activities=activities,
                 output=dummy_output,  # Dummy output with correct shape
                 input=z0,
-                solver=Tsit5(),  # More sophisticated solver
-                max_t1=50,  # Increased from default 20
-                stepsize_controller=PIDController(rtol=1e-4, atol=1e-4)  # Stricter tolerances
             )
             
             # Get predictions from the last layer's output
@@ -246,21 +240,11 @@ def main():
     pcn_optim = optax.adam(1e-3)
     pcn_opt_state = pcn_optim.init((eqx.filter(pcn_model, eqx.is_array), None))
     
-    # Print information about the inference parameter adjustments
-    print("\nPCN Inference Parameter Adjustments:")
-    print("  - Using Tsit5 ODE solver (more sophisticated than default Heun)")
-    print("  - Increased max_t1 from 20 to 50 for training and 100 for dream generation")
-    print("  - Tightened convergence tolerances from 1e-3 to 1e-4 for training")
-    print("  - Even stricter tolerances (1e-5) for dream generation")
-    print("  - Monitoring convergence during training to detect timeout events")
-    print("  - Reduced batch size from 128 to 4 for more granular learning")
-    print("  - Increased evaluation frequency (every 2 batches instead of 5)")
-    print("\nThese adjustments should help PCN reach better equilibrium states,")
-    print("potentially revealing its advantages in mitigating catastrophic forgetting.")
-    print("The 'goldilocks zone' we're targeting is where PCN can properly converge")
-    print("to meaningful equilibrium states while BP cannot overcome its inherent limitations.")
-    print("The smaller batch size will allow for more frequent evaluations and")
-    print("more effective early stopping, preventing overfitting to current tasks.")
+    # Print brief training configuration
+    print("\nPCN Training Configuration:")
+    print("  - Default JPC inference settings")
+    print("  - Batch size 16 for both PCN and BP")
+    print("  - Early stopping target accuracy 90% (eval every 2 batches)")
     
     bp_optimizer = optim.Adam(bp_model.parameters(), lr=1e-3)
     bp_criterion = nn.CrossEntropyLoss()
@@ -302,28 +286,14 @@ def main():
             z0 = jnp.array(x_batch.reshape(x_batch.shape[0], -1))
             zT = jax.nn.one_hot(jnp.array(y_batch), 10)
             
-            # Use JPC's make_pc_step with improved inference parameters
-            # Increase max_t1 to allow more time for convergence
-            # Use a more sophisticated ODE solver (Tsit5)
-            # Tighten convergence criteria with stricter tolerances
+            # Use JPC's make_pc_step with default inference settings
             result = jpc.make_pc_step(
                 model=pcn_model,
                 optim=pcn_optim,
                 opt_state=pcn_opt_state,
                 output=zT,
                 input=z0,
-                ode_solver=Tsit5(),  # More sophisticated solver than default Heun
-                max_t1=50,  # Increased from default 20 to allow more time for convergence
-                stepsize_controller=PIDController(rtol=1e-4, atol=1e-4),  # Stricter tolerances
-                record_activities=True  # Record activities to monitor convergence
             )
-            
-            # Monitor if inference reached equilibrium or hit timeout
-            if "activities" in result and len(result["activities"]) > 0:
-                # Check if the last recorded activity was at the max_t1 (timeout)
-                last_t = len(result["activities"][0]) - 1
-                if last_t >= 49:  # If close to max_t1=50, likely hit timeout
-                    print(f"  PCN Batch {batch_idx+1}: Inference may have hit timeout")
             
             # Update model and optimizer state
             pcn_model, pcn_opt_state = result["model"], result["opt_state"]
