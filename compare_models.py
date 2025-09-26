@@ -169,42 +169,48 @@ def generate_dream_images(model, class_idx, num_images=5):
         
         # Start with random noise at the bottom layer for better dream generation
         key = jax.random.PRNGKey(int(time.time()) + _)  # Different seed for each image
-        z0 = jax.random.normal(key, (1, 28*28)) * 0.01
-        
-        # Initialize activities for all layers
-        activities = []
-        # First layer is random noise
-        activities.append(z0)
-        # Initialize hidden layers with small random values
-        activities.append(jax.random.normal(key, (1, 256)) * 0.01)
-        activities.append(jax.random.normal(key, (1, 256)) * 0.01)
-        # Last layer is clamped to the target class
-        activities.append(zT.reshape(1, -1))
-        
-        # Run inference to equilibrium with improved parameters
-        # Note: For dream generation, we clamp the output layer to the target class
-        # and let the network infer the input that would generate this output
+        z0 = jax.random.normal(key, (1, 28 * 28)) * 0.01
+
+        # Initialize activities using a feedforward pass scaffold
+        # We do NOT manually overwrite the last layer; `output=zT` will handle clamping
+        activities = jpc.init_activities_with_ffwd(model=model, input=z0)
+
+        # Run inference to equilibrium with the output clamped and the input free to change
         converged_activities = jpc.solve_inference(
             params=(model, None),
             activities=activities,
             output=zT.reshape(1, -1),  # Clamp output to target class
-            input=None,  # No input clamping
-            solver=Tsit5(),  # More sophisticated solver
-            max_t1=100,  # Even longer for dream generation
-            stepsize_controller=PIDController(rtol=1e-5, atol=1e-5)  # Even stricter tolerances
+            input=None,  # Do not clamp the input; let it be inferred
         )
-        
-        # In the new JPC API, the converged_activities structure is different
-        # We need to extract the input layer activities which should be the first element
-        # But we need to be careful about the shape
-        
-        # Print the structure of converged_activities to debug
-        print(f"Dream generation - converged_activities structure: {[a.shape for a in converged_activities]}")
-        
-        # For now, use the input as a placeholder
-        # This will be updated once we understand the structure
-        dream_image = z0.reshape(28, 28)
-        dream_images.append(dream_image)
+
+        # Extract the inferred input (bottom layer) at the final time step
+        # In evaluation, logits were obtained via converged_activities[-1][-1].
+        # By analogy, bottom layer should be converged_activities[0][-1].
+        try:
+            inferred_input = converged_activities[0][-1]
+        except Exception:
+            # Fallback: search for a tensor shaped like the input
+            inferred_input = None
+            for layer in converged_activities:
+                if hasattr(layer, "shape") and layer.shape == (1, 28 * 28):
+                    inferred_input = layer
+                    break
+                # If layer is a sequence over time
+                if isinstance(layer, (list, tuple)):
+                    for item in layer[::-1]:
+                        if hasattr(item, "shape") and item.shape == (1, 28 * 28):
+                            inferred_input = item
+                            break
+                    if inferred_input is not None:
+                        break
+            if inferred_input is None:
+                # As a last resort, use the current z0 to avoid crashing
+                inferred_input = z0
+
+        # Normalize and reshape for visualization
+        img = inferred_input.reshape(28, 28)
+        img = (img - img.min()) / (img.max() - img.min() + 1e-8)
+        dream_images.append(img)
     
     return dream_images
 

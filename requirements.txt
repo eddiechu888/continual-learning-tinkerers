@@ -1,8 +1,9 @@
-jpc==0.1.0
-jax[cpu]==0.4.35
-equinox==0.11.0
-torch==2.0.1
-torchvision==0.15.2
-matplotlib==3.7.2
-numpy==1.24.4
-tqdm==4.65.0
+git+https://github.com/thebuckleylab/jpc.git
+jax[cpu]==0.4.38
+equinox>=0.11.2
+torch==2.4.1
+torchvision==0.19.1
+matplotlib==3.9.0
+numpy==1.26.4
+tqdm==4.66.4
+diffrax>=0.6.0
